@@ -44,6 +44,7 @@ type Config struct {
 	// Fetcher
 	FetchTimeout      time.Duration
 	FetchMaxRedirects int
+	DisableSSRF       bool
 
 	// Logging
 	LogLevel string // "debug", "info", "warn", "error"
@@ -92,6 +93,7 @@ func Load() (*Config, error) {
 
 		FetchTimeout:      envDurationOrDefault("FETCH_TIMEOUT", 30*time.Second),
 		FetchMaxRedirects: envIntOrDefault("FETCH_MAX_REDIRECTS", 10),
+		DisableSSRF:       envBoolOrDefault("DISABLE_SSRF", false),
 
 		LogLevel: envOrDefault("LOG_LEVEL", "info"),
 

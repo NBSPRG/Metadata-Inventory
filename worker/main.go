@@ -60,7 +60,7 @@ func run() error {
 		return fmt.Errorf("init repository: %w", err)
 	}
 
-	httpFetcher := fetcher.NewHTTPFetcher(cfg.FetchTimeout, cfg.FetchMaxRedirects)
+	httpFetcher := fetcher.NewHTTPFetcher(cfg.FetchTimeout, cfg.FetchMaxRedirects, cfg.DisableSSRF)
 
 	kafkaConsumer := kafka.NewKafkaConsumer(
 		cfg.KafkaBrokers,

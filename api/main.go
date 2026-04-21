@@ -97,8 +97,7 @@ func run() error {
 	producer := kafka.NewKafkaProducer(cfg.KafkaBrokers, cfg.KafkaTopic, logger)
 	defer producer.Close()
 
-	// --- Initialize HTTP fetcher ---
-	httpFetcher := fetcher.NewHTTPFetcher(cfg.FetchTimeout, cfg.FetchMaxRedirects)
+	httpFetcher := fetcher.NewHTTPFetcher(cfg.FetchTimeout, cfg.FetchMaxRedirects, cfg.DisableSSRF)
 
 	// --- Build service layer ---
 	metadataSvc := service.NewMetadataService(repo, producer, httpFetcher, flags, logger)

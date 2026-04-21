@@ -15,9 +15,7 @@ import (
 // httptest.Server (which binds to 127.0.0.1). In production, SSRF
 // protection is always enforced.
 func newTestFetcher(timeout time.Duration, maxRedirects int) *HTTPFetcher {
-	f := NewHTTPFetcher(timeout, maxRedirects)
-	f.skipSSRF = true
-	return f
+	return NewHTTPFetcher(timeout, maxRedirects, true)
 }
 
 func TestHTTPFetcher_BasicFetch(t *testing.T) {
@@ -94,7 +92,7 @@ func TestHTTPFetcher_SensitiveHeadersSanitized(t *testing.T) {
 
 func TestHTTPFetcher_SSRFBlocked(t *testing.T) {
 	// SSRF should block private IPs in production mode
-	fetcher := NewHTTPFetcher(5*time.Second, 10)
+	fetcher := NewHTTPFetcher(5*time.Second, 10, false)
 	_, err := fetcher.Fetch("http://127.0.0.1:9999/test", false)
 
 	assert.Error(t, err)
