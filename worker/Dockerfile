@@ -14,7 +14,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/worker ./worker
 
 # Runtime stage — minimal image
 FROM alpine:3.19
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates wget
 COPY --from=builder /bin/worker /worker
 
 # Non-root user

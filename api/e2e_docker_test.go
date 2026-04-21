@@ -35,22 +35,27 @@ func TestE2E_DockerFullStack(t *testing.T) {
 	require.Eventually(t, func() bool {
 		resp, err := http.Get(fmt.Sprintf("%s/v1/metadata?url=%s", baseURL, query))
 		if err != nil {
+			t.Logf("poll error: %v", err)
 			return false
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode == http.StatusAccepted {
+			t.Logf("poll: 202 Accepted (still processing)")
 			return false
 		}
 
 		if resp.StatusCode != http.StatusOK {
+			t.Logf("poll: unexpected status %d", resp.StatusCode)
 			return false
 		}
 
 		if err := json.NewDecoder(resp.Body).Decode(&final); err != nil {
+			t.Logf("poll: decode error: %v", err)
 			return false
 		}
 
+		t.Logf("poll: 200 OK, status=%s", final.Status)
 		return final.Status == db.StatusReady
 	}, 2*time.Minute, 2*time.Second)
 

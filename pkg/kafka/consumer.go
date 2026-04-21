@@ -44,7 +44,7 @@ func NewKafkaConsumer(brokers []string, topic, groupID, dltTopic string, maxRetr
 		MinBytes:       1,
 		MaxBytes:       10e6,
 		CommitInterval: 0,
-		StartOffset:    kafka.LastOffset,
+		StartOffset:    kafka.FirstOffset,
 		MaxWait:        1 * time.Second,
 	})
 
