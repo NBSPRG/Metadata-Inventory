@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-unit:
+    name: Build, Vet, Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Build all packages
+        run: go build ./...
+
+      - name: Run unit/integration tests (non-docker)
+        run: go test -race -count=1 ./...
+
+  e2e-docker:
+    name: Docker Full-Stack E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    needs: build-and-unit
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Prepare env file
+        run: cp .env.example .env
+
+      - name: Start docker stack
+        run: docker compose up -d --build
+
+      - name: Run docker e2e test
+        run: go test -tags=e2e_docker -count=1 -v ./api -run TestE2E_DockerFullStack
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Shutdown docker stack
+        if: always()
+        run: docker compose down -v --remove-orphans

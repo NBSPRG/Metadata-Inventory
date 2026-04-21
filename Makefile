@@ -1,4 +1,4 @@
-.PHONY: all build test lint clean up down fmt vet tidy swagger
+.PHONY: all build test lint clean up down fmt vet tidy swagger test-e2e-docker
 
 # ============================================================
 # HTTP Metadata Inventory — Makefile
@@ -38,6 +38,11 @@ test-cover:
 
 test-verbose:
 	go test -race -v -count=1 ./...
+
+test-e2e-docker:
+	docker-compose down -v
+	docker-compose up -d --build
+	go test -tags=e2e_docker -count=1 -v ./api -run TestE2E_DockerFullStack
 
 # --- Docker ---
 up:
