@@ -17,6 +17,7 @@ func TestLoad_Defaults(t *testing.T) {
 
 	assert.Equal(t, "metadata-inventory", cfg.ServiceName)
 	assert.Equal(t, 8080, cfg.HTTPPort)
+	assert.Equal(t, 9091, cfg.WorkerMetricsPort)
 	assert.Equal(t, "mongodb://localhost:27017", cfg.MongoURI)
 	assert.Equal(t, "metadata_inventory", cfg.MongoDB)
 	assert.Equal(t, []string{"localhost:9092"}, cfg.KafkaBrokers)
@@ -32,6 +33,7 @@ func TestLoad_CustomValues(t *testing.T) {
 	clearEnv(t)
 
 	t.Setenv("HTTP_PORT", "9090")
+	t.Setenv("WORKER_METRICS_PORT", "9191")
 	t.Setenv("MONGO_URI", "mongodb://custom:27017")
 	t.Setenv("MONGO_DB", "test_db")
 	t.Setenv("KAFKA_BROKERS", "broker1:9092,broker2:9092")
@@ -43,6 +45,7 @@ func TestLoad_CustomValues(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, 9090, cfg.HTTPPort)
+	assert.Equal(t, 9191, cfg.WorkerMetricsPort)
 	assert.Equal(t, "mongodb://custom:27017", cfg.MongoURI)
 	assert.Equal(t, "test_db", cfg.MongoDB)
 	assert.Equal(t, []string{"broker1:9092", "broker2:9092"}, cfg.KafkaBrokers)
@@ -58,6 +61,15 @@ func TestLoad_InvalidPort(t *testing.T) {
 	_, err := Load()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "HTTP_PORT")
+}
+
+func TestLoad_InvalidWorkerMetricsPort(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("WORKER_METRICS_PORT", "99999")
+
+	_, err := Load()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "WORKER_METRICS_PORT")
 }
 
 func TestLoad_InvalidLogLevel(t *testing.T) {
@@ -86,7 +98,7 @@ func clearEnv(t *testing.T) {
 	t.Helper()
 	vars := []string{
 		"SERVICE_NAME", "SERVICE_VERSION", "ENVIRONMENT",
-		"HTTP_PORT", "HTTP_READ_TIMEOUT", "HTTP_WRITE_TIMEOUT", "HTTP_SHUTDOWN_TIMEOUT",
+		"HTTP_PORT", "WORKER_METRICS_PORT", "HTTP_READ_TIMEOUT", "HTTP_WRITE_TIMEOUT", "HTTP_SHUTDOWN_TIMEOUT",
 		"MONGO_URI", "MONGO_DB", "MONGO_MAX_POOL_SIZE", "MONGO_CONN_TIMEOUT",
 		"KAFKA_BROKERS", "KAFKA_TOPIC", "KAFKA_GROUP_ID", "KAFKA_DLT_TOPIC", "KAFKA_MAX_RETRIES",
 		"FETCH_TIMEOUT", "FETCH_MAX_REDIRECTS",

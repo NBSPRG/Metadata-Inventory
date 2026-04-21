@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/metadata-inventory/pkg/db"
-	"github.com/metadata-inventory/pkg/kafka"
 )
 
 // HealthHandler handles GET /health (liveness probe).
@@ -17,14 +16,21 @@ func NewHealthHandler() *HealthHandler {
 	return &HealthHandler{}
 }
 
-type healthResponse struct {
+// HealthResponse is returned by the liveness endpoint.
+type HealthResponse struct {
 	Status    string `json:"status"`
 	Timestamp string `json:"timestamp"`
 }
 
-// ServeHTTP returns a simple OK response for liveness checks.
+// ServeHTTP godoc
+// @Summary Liveness probe
+// @Description Returns process liveness for container orchestration and smoke tests.
+// @Tags system
+// @Produce json
+// @Success 200 {object} HealthResponse
+// @Router /health [get]
 func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, healthResponse{
+	writeJSON(w, http.StatusOK, HealthResponse{
 		Status:    "ok",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
@@ -33,29 +39,40 @@ func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // ReadyHandler handles GET /ready (readiness probe).
 // It checks that MongoDB and Kafka are reachable.
 type ReadyHandler struct {
-	repo     db.MetadataRepository
-	consumer *kafka.KafkaConsumer // nil for API service (only producer)
+	repo  db.MetadataRepository
+	kafka kafkaPinger
+}
+
+type kafkaPinger interface {
+	Ping(ctx context.Context) error
 }
 
 // NewReadyHandler creates a new readiness check handler.
-func NewReadyHandler(repo db.MetadataRepository, consumer *kafka.KafkaConsumer) *ReadyHandler {
+func NewReadyHandler(repo db.MetadataRepository, dependency kafkaPinger) *ReadyHandler {
 	return &ReadyHandler{
-		repo:     repo,
-		consumer: consumer,
+		repo:  repo,
+		kafka: dependency,
 	}
 }
 
-type readyResponse struct {
+// ReadyResponse is returned by the readiness endpoint.
+type ReadyResponse struct {
 	Status string            `json:"status"`
 	Checks map[string]string `json:"checks"`
 }
 
-// ServeHTTP checks dependency health and returns readiness status.
+// ServeHTTP godoc
+// @Summary Readiness probe
+// @Description Verifies that MongoDB and Kafka are reachable by the API service.
+// @Tags system
+// @Produce json
+// @Success 200 {object} ReadyResponse
+// @Failure 503 {object} ReadyResponse
+// @Router /ready [get]
 func (h *ReadyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	checks := make(map[string]string)
 	allOK := true
 
-	// Check MongoDB
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 
@@ -66,19 +83,18 @@ func (h *ReadyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		checks["mongodb"] = "ok"
 	}
 
-	// Check Kafka (if consumer available)
-	if h.consumer != nil {
-		if err := h.consumer.Ping(); err != nil {
+	if h.kafka != nil {
+		if err := h.kafka.Ping(ctx); err != nil {
 			checks["kafka"] = "error: " + err.Error()
 			allOK = false
 		} else {
 			checks["kafka"] = "ok"
 		}
 	} else {
-		checks["kafka"] = "ok" // API service doesn't consume
+		checks["kafka"] = "skipped"
 	}
 
-	resp := readyResponse{
+	resp := ReadyResponse{
 		Checks: checks,
 	}
 

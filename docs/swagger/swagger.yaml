@@ -1,0 +1,224 @@
+basePath: /
+definitions:
+  apperrors.ErrorResponse:
+    properties:
+      details:
+        type: string
+      error:
+        type: string
+      message:
+        type: string
+      request_id:
+        type: string
+    type: object
+  db.CookieRecord:
+    properties:
+      domain:
+        type: string
+      http_only:
+        type: boolean
+      name:
+        type: string
+      path:
+        type: string
+      secure:
+        type: boolean
+      value:
+        type: string
+    type: object
+  db.MetadataRecord:
+    properties:
+      cookies:
+        items:
+          $ref: '#/definitions/db.CookieRecord'
+        type: array
+      created_at:
+        type: string
+      error:
+        type: string
+      fetch_duration_ms:
+        type: integer
+      fetched_at:
+        type: string
+      headers:
+        additionalProperties:
+          items:
+            type: string
+          type: array
+        type: object
+      page_source:
+        type: string
+      page_source_size_bytes:
+        type: integer
+      retry_count:
+        type: integer
+      schema_version:
+        type: integer
+      status:
+        $ref: '#/definitions/db.Status'
+      updated_at:
+        type: string
+      url:
+        type: string
+      url_hash:
+        type: string
+    type: object
+  db.Status:
+    enum:
+    - pending
+    - fetching
+    - ready
+    - failed
+    type: string
+    x-enum-varnames:
+    - StatusPending
+    - StatusFetching
+    - StatusReady
+    - StatusFailed
+  handlers.HealthResponse:
+    properties:
+      status:
+        type: string
+      timestamp:
+        type: string
+    type: object
+  handlers.PendingResponse:
+    properties:
+      message:
+        type: string
+      poll_after_seconds:
+        type: integer
+      status:
+        type: string
+      url:
+        type: string
+    type: object
+  handlers.PostRequest:
+    properties:
+      url:
+        type: string
+    type: object
+  handlers.ReadyResponse:
+    properties:
+      checks:
+        additionalProperties:
+          type: string
+        type: object
+      status:
+        type: string
+    type: object
+info:
+  contact: {}
+  description: HTTP metadata capture service with synchronous and asynchronous inventory
+    flows.
+  title: Metadata Inventory API
+  version: 0.1.0
+paths:
+  /health:
+    get:
+      description: Returns process liveness for container orchestration and smoke
+        tests.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.HealthResponse'
+      summary: Liveness probe
+      tags:
+      - system
+  /ready:
+    get:
+      description: Verifies that MongoDB and Kafka are reachable by the API service.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ReadyResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ReadyResponse'
+      summary: Readiness probe
+      tags:
+      - system
+  /v1/metadata:
+    get:
+      description: Returns cached metadata when present. On cache miss, persists a
+        pending record, dispatches async collection, and returns 202 immediately.
+      parameters:
+      - description: Absolute URL to look up
+        in: query
+        name: url
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/db.MetadataRecord'
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/handlers.PendingResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperrors.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperrors.ErrorResponse'
+      summary: Get metadata for a URL
+      tags:
+      - metadata
+    post:
+      consumes:
+      - application/json
+      description: Validates a URL, stores a pending metadata record, and either fetches
+        inline or dispatches async collection depending on feature flags.
+      parameters:
+      - description: URL to inventory
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.PostRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/db.MetadataRecord'
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/db.MetadataRecord'
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/db.MetadataRecord'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperrors.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/apperrors.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperrors.ErrorResponse'
+      summary: Create or refresh metadata for a URL
+      tags:
+      - metadata
+schemes:
+- http
+swagger: "2.0"

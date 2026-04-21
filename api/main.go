@@ -13,6 +13,7 @@ import (
 
 	"github.com/metadata-inventory/api/handlers"
 	"github.com/metadata-inventory/api/server"
+	swaggerdocs "github.com/metadata-inventory/docs/swagger"
 	"github.com/metadata-inventory/pkg/config"
 	"github.com/metadata-inventory/pkg/db"
 	"github.com/metadata-inventory/pkg/featureflags"
@@ -22,6 +23,11 @@ import (
 	"github.com/metadata-inventory/pkg/service"
 )
 
+// @title Metadata Inventory API
+// @version 0.1.0
+// @description HTTP metadata capture service with synchronous and asynchronous inventory flows.
+// @BasePath /
+// @schemes http
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "FATAL: %v\n", err)
@@ -35,6 +41,13 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+
+	swaggerdocs.SwaggerInfo.Title = "Metadata Inventory API"
+	swaggerdocs.SwaggerInfo.Description = "HTTP metadata capture service with synchronous and asynchronous inventory flows."
+	swaggerdocs.SwaggerInfo.Version = cfg.ServiceVersion
+	swaggerdocs.SwaggerInfo.Host = fmt.Sprintf("localhost:%d", cfg.HTTPPort)
+	swaggerdocs.SwaggerInfo.BasePath = "/"
+	swaggerdocs.SwaggerInfo.Schemes = []string{"http"}
 
 	// --- Initialize observability ---
 	logger := observability.SetupLogger(cfg.LogLevel, cfg.ServiceName, cfg.ServiceVersion)
@@ -62,7 +75,9 @@ func run() error {
 	}
 	defer func() {
 		if tracerShutdown != nil {
-			tracerShutdown(context.Background())
+			if err := tracerShutdown(context.Background()); err != nil {
+				logger.Warn("tracer shutdown failed", slog.String("error", err.Error()))
+			}
 		}
 	}()
 
@@ -82,8 +97,7 @@ func run() error {
 	producer := kafka.NewKafkaProducer(cfg.KafkaBrokers, cfg.KafkaTopic, logger)
 	defer producer.Close()
 
-	// --- Initialize HTTP fetcher ---
-	httpFetcher := fetcher.NewHTTPFetcher(cfg.FetchTimeout, cfg.FetchMaxRedirects)
+	httpFetcher := fetcher.NewHTTPFetcher(cfg.FetchTimeout, cfg.FetchMaxRedirects, cfg.DisableSSRF)
 
 	// --- Build service layer ---
 	metadataSvc := service.NewMetadataService(repo, producer, httpFetcher, flags, logger)
@@ -92,7 +106,7 @@ func run() error {
 	postHandler := handlers.NewMetadataPostHandler(metadataSvc)
 	getHandler := handlers.NewMetadataGetHandler(metadataSvc)
 	healthHandler := handlers.NewHealthHandler()
-	readyHandler := handlers.NewReadyHandler(repo, nil) // No consumer in API service
+	readyHandler := handlers.NewReadyHandler(repo, producer)
 
 	// --- Build router and server ---
 	router := server.NewRouter(logger, metrics, tracer, flags)

@@ -20,7 +20,7 @@ type HTTPFetcher struct {
 
 // NewHTTPFetcher creates an HTTPFetcher with the given timeout and redirect limit.
 // It configures SSRF protection by blocking connections to private IP ranges.
-func NewHTTPFetcher(timeout time.Duration, maxRedirects int) *HTTPFetcher {
+func NewHTTPFetcher(timeout time.Duration, maxRedirects int, disableSSRF bool) *HTTPFetcher {
 	transport := &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   10 * time.Second,
@@ -46,6 +46,7 @@ func NewHTTPFetcher(timeout time.Duration, maxRedirects int) *HTTPFetcher {
 	return &HTTPFetcher{
 		client:       client,
 		maxRedirects: maxRedirects,
+		skipSSRF:     disableSSRF,
 	}
 }
 

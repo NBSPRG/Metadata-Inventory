@@ -1,4 +1,4 @@
-.PHONY: all build test lint clean up down fmt vet tidy
+.PHONY: all build test lint clean up down fmt vet tidy swagger test-e2e-docker
 
 # ============================================================
 # HTTP Metadata Inventory — Makefile
@@ -39,6 +39,11 @@ test-cover:
 test-verbose:
 	go test -race -v -count=1 ./...
 
+test-e2e-docker:
+	docker-compose down -v
+	docker-compose up -d --build
+	go test -tags=e2e_docker -count=1 -v ./api -run TestE2E_DockerFullStack
+
 # --- Docker ---
 up:
 	docker-compose up -d --build
@@ -51,10 +56,12 @@ logs:
 
 # --- Utilities ---
 clean:
-	rm -rf bin/ coverage.out coverage.html
+	if exist bin rmdir /s /q bin
+	if exist coverage.out del /q coverage.out
+	if exist coverage.html del /q coverage.html
 
 env:
-	cp -n .env.example .env || true
+	if not exist .env copy .env.example .env >NUL
 
 help:
 	@echo "Available targets:"
@@ -70,3 +77,7 @@ help:
 	@echo "  logs         - Tail docker-compose logs"
 	@echo "  clean        - Remove build artifacts"
 	@echo "  env          - Create .env from .env.example"
+	@echo "  swagger      - Generate Swagger docs"
+
+swagger:
+	swag init -g api/main.go -o docs/swagger

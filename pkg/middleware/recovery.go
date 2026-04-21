@@ -35,7 +35,7 @@ func Recovery(logger *slog.Logger) func(http.Handler) http.Handler {
 
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusInternalServerError)
-					json.NewEncoder(w).Encode(errResp)
+					_ = json.NewEncoder(w).Encode(errResp)
 				}
 			}()
 

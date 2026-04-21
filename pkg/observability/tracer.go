@@ -11,6 +11,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // SetupTracer initializes the OpenTelemetry tracer. When enabled is false,
@@ -20,7 +21,7 @@ func SetupTracer(ctx context.Context, enabled bool, serviceName, version, endpoi
 	if !enabled {
 		slog.Info("tracing disabled — using no-op tracer")
 		noopShutdown := func(_ context.Context) error { return nil }
-		return trace.NewNoopTracerProvider().Tracer(serviceName), noopShutdown, nil
+		return noop.NewTracerProvider().Tracer(serviceName), noopShutdown, nil
 	}
 
 	exporter, err := otlptracegrpc.New(ctx,

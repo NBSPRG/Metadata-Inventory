@@ -1,15 +1,15 @@
-// Worker service entry point for the HTTP Metadata Inventory.
-// Consumes Kafka messages, fetches URL metadata, and persists results.
-// All dependency wiring happens here via manual injection.
 package main
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
+	"time"
 
 	workerConsumer "github.com/metadata-inventory/worker/consumer"
 
@@ -19,6 +19,7 @@ import (
 	"github.com/metadata-inventory/pkg/fetcher"
 	"github.com/metadata-inventory/pkg/kafka"
 	"github.com/metadata-inventory/pkg/observability"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -29,28 +30,24 @@ func main() {
 }
 
 func run() error {
-	// --- Load configuration ---
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	// --- Initialize observability ---
 	logger := observability.SetupLogger(cfg.LogLevel, cfg.ServiceName+"-worker", cfg.ServiceVersion)
 	logger.Info("starting worker service",
 		slog.String("environment", cfg.Environment),
 		slog.String("kafka_topic", cfg.KafkaTopic),
 		slog.String("kafka_group", cfg.KafkaGroupID),
+		slog.Int("metrics_port", cfg.WorkerMetricsPort),
 		slog.String("version", cfg.ServiceVersion),
 	)
 
-	// Feature flags
 	flags := featureflags.NewEnvFlags(cfg)
-
-	// Metrics
 	metrics := observability.NewMetrics("metadata_worker")
+	metricsServer := startMetricsServer(cfg.WorkerMetricsPort, flags.IsEnabled(featureflags.MetricsEnabled), logger)
 
-	// --- Connect to MongoDB ---
 	ctx := context.Background()
 	mongoDB, err := db.ConnectMongo(ctx, cfg.MongoURI, cfg.MongoDB, cfg.MongoMaxPoolSize, cfg.MongoConnTimeout, logger)
 	if err != nil {
@@ -63,10 +60,8 @@ func run() error {
 		return fmt.Errorf("init repository: %w", err)
 	}
 
-	// --- Initialize HTTP fetcher ---
-	httpFetcher := fetcher.NewHTTPFetcher(cfg.FetchTimeout, cfg.FetchMaxRedirects)
+	httpFetcher := fetcher.NewHTTPFetcher(cfg.FetchTimeout, cfg.FetchMaxRedirects, cfg.DisableSSRF)
 
-	// --- Initialize Kafka consumer ---
 	kafkaConsumer := kafka.NewKafkaConsumer(
 		cfg.KafkaBrokers,
 		cfg.KafkaTopic,
@@ -76,36 +71,62 @@ func run() error {
 		logger,
 	)
 
-	// --- Build worker ---
 	worker := workerConsumer.NewWorker(repo, httpFetcher, kafkaConsumer, flags, metrics, logger)
 
-	// --- Graceful shutdown setup ---
 	shutdownCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Start worker in goroutine
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- worker.Start(shutdownCtx)
 	}()
 
-	logger.Info("worker service running — press Ctrl+C to stop")
+	logger.Info("worker service running")
 
-	// Wait for shutdown signal or worker error
 	select {
 	case err := <-errCh:
 		if err != nil {
 			return fmt.Errorf("worker error: %w", err)
 		}
 	case <-shutdownCtx.Done():
-		logger.Info("shutdown signal received — draining in-flight work")
+		logger.Info("shutdown signal received: draining in-flight work")
 	}
 
-	// Close worker (closes Kafka consumer)
+	metricsShutdownCtx, metricsCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer metricsCancel()
+	if err := metricsServer.Shutdown(metricsShutdownCtx); err != nil {
+		logger.Error("worker metrics server shutdown error", slog.String("error", err.Error()))
+	}
+
 	if err := worker.Close(); err != nil {
 		logger.Error("worker close error", slog.String("error", err.Error()))
 	}
 
 	logger.Info("worker service stopped gracefully")
 	return nil
+}
+
+func startMetricsServer(port int, metricsEnabled bool, logger *slog.Logger) *http.Server {
+	mux := http.NewServeMux()
+	if metricsEnabled {
+		mux.Handle("/metrics", promhttp.Handler())
+	}
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	srv := &http.Server{
+		Addr:    ":" + strconv.Itoa(port),
+		Handler: mux,
+	}
+
+	go func() {
+		logger.Info("worker metrics server starting", slog.String("addr", srv.Addr))
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("worker metrics server error", slog.String("error", err.Error()))
+		}
+	}()
+
+	return srv
 }
