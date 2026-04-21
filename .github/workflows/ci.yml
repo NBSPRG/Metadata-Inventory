@@ -4,14 +4,67 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build-and-unit:
     name: Build, Vet, Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs:
+      - lint
+      - security
 
     steps:
       - name: Checkout
@@ -35,10 +88,10 @@ jobs:
       - name: Run unit/integration tests (non-docker)
         run: go test -race -count=1 ./...
 
-  e2e-docker:
-    name: Docker Full-Stack E2E
+  coverage:
+    name: Coverage Gate
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 20
     needs: build-and-unit
 
     steps:
@@ -51,8 +104,39 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Run coverage
+        run: go test -count=1 -coverprofile=coverage.out ./...
+
+      - name: Enforce minimum coverage
+        env:
+          COVERAGE_MIN: "60"
+        run: |
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%", "", $3); print $3}')
+          echo "Total coverage: ${total}%"
+          awk -v total="$total" -v min="$COVERAGE_MIN" 'BEGIN { exit (total+0 >= min+0) ? 0 : 1 }'
+
+  e2e-docker:
+    name: Docker Full-Stack E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    needs:
+      - build-and-unit
+      - coverage
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Prepare env file
-        run: cp .env.example .env
+        run: |
+          cp .env.example .env
+          echo "FF_ASYNC_FETCH_ONLY=true" >> .env
 
       - name: Start docker stack
         run: docker compose up -d --build
