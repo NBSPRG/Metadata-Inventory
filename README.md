@@ -10,16 +10,27 @@ Metadata Inventory is a Go-based HTTP metadata capture system with an API servic
 
 ## Quick Start
 
-1. Create local env file:
-   `make env`
-2. Start stack:
-   `docker compose up -d --build`
-3. Verify:
+This project uses `make` to simplify execution.
+
+1. Install dependencies (Ubuntu/Debian only, requires `sudo`):
+   ```bash
+   make install-deps
+   ```
+2. Create local environment configs:
+   ```bash
+   make env
+   ```
+3. Start the entire stack via Docker:
+   ```bash
+   make up
+   ```
+4. Check health endpoints to verify everything is running:
    - `http://localhost:8080/health`
    - `http://localhost:8080/ready`
-   - `http://localhost:9090`
-4. Submit URL:
-   `curl -X POST http://localhost:8080/v1/metadata -H "Content-Type: application/json" -d "{\"url\":\"https://example.com\"}"`
+5. Submit a URL for fetching:
+   ```bash
+   curl -X POST http://localhost:8080/v1/metadata -H "Content-Type: application/json" -d "{\"url\":\"https://example.com\"}"
+   ```
 
 ## API Behavior
 
@@ -58,8 +69,22 @@ See full defaults in [.env.example](.env.example).
 
 ## Testing
 
-- Unit/package tests: `go test -race -count=1 ./...`
-- Docker E2E: `go test -tags=e2e_docker -count=1 -v ./api -run TestE2E_DockerFullStack`
+The project uses `make` targets to run tests.
+
+- **Run all unit/integration tests:**
+  ```bash
+  make test
+  ```
+- **Run the Full E2E Test Suite against Docker:**
+  Automatically spins up containers, assertions, and tears down safely.
+  *(Ensure `make install-deps` has been executed if on a clean VM)*
+  ```bash
+  make test-e2e-docker
+  ```
+- **Review Code Coverage:**
+  ```bash
+  make test-cover
+  ```
 
 ## CI Overview
 

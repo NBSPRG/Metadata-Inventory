@@ -1,175 +1,36 @@
-# Metadata Inventory — Implementation Alignment Plan
+# Architecture & Implementation Notes
 
-Status: Active implementation baseline
-Last Updated: 2026-04-22
+This document provides a high-level overview of how the HTTP Metadata Inventory Service was built. It reflects the exact architecture and behaviors currently implemented in the repository.
 
-This document replaces the original "greenfield" planning draft with an implementation-aligned plan that reflects what is currently in the repository.
+## Architecture Overview
 
-## 1. Current Baseline
+The system is designed around a clean, decoupled architecture:
+- **API Service**: Handles incoming HTTP requests, validates URLs, and either performs inline fetching or delegates to the background worker via Kafka.
+- **Background Worker**: A standalone Go application that continuously consumes Kafka messages to process URL fetches asynchronously. This prevents the API from being blocked by slow external sites or large payloads.
+- **MongoDB**: Used as our primary data store. We index records using a unique `url_hash` instead of raw URLs to optimize query performance and enforce uniqueness guarantees cleanly.
+- **Kafka**: Acts as the message broker between the API and Worker. If fetch requests fail, the worker respects retry semantics, utilizing a Dead Letter Topic (DLT) when max retries are exceeded.
 
-## 1.1 Runtime and Toolchain
+## Core API Behavior
 
-- Module Go version: `1.25.1` ([go.mod](go.mod))
-- CI Go version: `1.25.9` for all jobs ([.github/workflows/ci.yml](.github/workflows/ci.yml))
-- API and worker are separate binaries with shared packages under `pkg/`.
+- **POST `/v1/metadata`**: When you submit a URL, the API validates it. Under normal operation (or when feature flags dictate), it will attempt to fetch and store the metadata synchronously, returning a `201 Created`. If the system is configured strongly for async queueing, it will emit an event and return a `202 Accepted`.
+- **GET `/v1/metadata`**: Looks up the URL. If the metadata is cached and ready, it returns `200 OK` instantly. On a cache miss, to ensure fast API responsiveness, it dispatches a fetch job to Kafka and immediately returns `202 Accepted` to let the client know processing is underway.
 
-## 1.2 Services in Compose
+## Implementation Details
 
-- `api`: HTTP endpoints and Swagger UI
-- `worker`: Kafka consumer + metadata fetch pipeline
-- `mongo`, `kafka`, `zookeeper`, `prometheus`
+- **Language & Toolchain**: Written purely in Go `1.25` relying heavily on interface-driven design.
+- **Resilience**: Database logic uses strict context timeouts. Kafka connections safely rebalance.
+- **Feature Flags**: Environment variables natively control the system's behavior (e.g., `FF_ASYNC_FETCH_ONLY` forces all traffic to be handled asynchronously).
+- **Observability**: Implemented structural logging, basic Prometheus metric endpoints, and panic recovery middleware.
 
-Stack definition: [docker-compose.yml](docker-compose.yml)
+## Testing Strategy
 
-## 1.3 Implemented API Surface
+All testing targets use standardized Docker and Make methodologies:
+- **Unit & Integration**: Standard Go test suite.
+- **End-to-End (E2E)**: Tests spin up a full Docker Compose cluster, run full-scale data submissions ensuring synchronous and asynchronous transitions work correctly, and validate database persistence before tearing the cluster back down safely.
 
-- `POST /v1/metadata`
-- `GET /v1/metadata?url=...`
-- `GET /health`
-- `GET /ready`
-- `GET /metrics` (feature-flagged)
-- `GET /swagger/*`
+## Future Opportunities
 
-Route registration: [api/server/routes.go](api/server/routes.go)
-
-## 2. Behavior Contract (As Implemented)
-
-## 2.1 POST /v1/metadata
-
-Source of truth:
-- [api/handlers/metadata_post.go](api/handlers/metadata_post.go)
-- [pkg/service/metadata_service_impl.go](pkg/service/metadata_service_impl.go)
-
-Behavior:
-- Validates JSON body and absolute http(s) URL
-- If existing record is `ready`: returns `200`
-- If existing record is `pending` or `fetching`: returns `202`
-- If new URL:
-  - `FF_ASYNC_FETCH_ONLY=true`: queues Kafka message and returns `202`
-  - `FF_ASYNC_FETCH_ONLY=false`: fetches inline and returns `201` on success
-- Inline fetch failure maps to `422 FETCH_FAILED`
-
-## 2.2 GET /v1/metadata
-
-Source of truth:
-- [api/handlers/metadata_get.go](api/handlers/metadata_get.go)
-- [pkg/service/metadata_service_impl.go](pkg/service/metadata_service_impl.go)
-
-Behavior:
-- `200` on cache hit (`ready`)
-- `202` when record is in progress (`pending` or `fetching`)
-- `202` after cache miss dispatches async fetch to Kafka
-
-## 2.3 Health and Readiness
-
-Source of truth:
-- [api/handlers/health.go](api/handlers/health.go)
-
-Behavior:
-- `/health`: liveness only (`200`)
-- `/ready`: checks MongoDB and Kafka producer ping (`200` when all OK, else `503`)
-
-## 3. Data and Messaging
-
-## 3.1 MongoDB Model
-
-Source of truth:
-- [pkg/db/models.go](pkg/db/models.go)
-- [pkg/db/mongo_repository.go](pkg/db/mongo_repository.go)
-
-Implemented fields include:
-- URL, URL hash, status, schema version
-- headers, cookies, page source, size, fetch duration
-- retry count, fetched/created/updated timestamps
-
-Implemented indexes:
-- `url` unique sparse
-- `url_hash` unique
-- `status`
-- `created_at` descending
-
-## 3.2 Kafka Flow
-
-Source of truth:
-- [pkg/kafka/messages.go](pkg/kafka/messages.go)
-- [pkg/kafka/consumer.go](pkg/kafka/consumer.go)
-- [worker/consumer/consumer.go](worker/consumer/consumer.go)
-
-Implemented semantics:
-- Message carries version, URL, requested timestamp, request ID, source
-- Manual offset commit after success or successful DLT routing
-- Retries with bounded backoff
-- DLT routing after max retries
-
-## 4. Feature Flags (Implemented)
-
-Source of truth:
-- [pkg/featureflags/flags.go](pkg/featureflags/flags.go)
-- [pkg/config/config.go](pkg/config/config.go)
-
-Implemented flags:
-- `FF_RATE_LIMIT_ENABLED`
-- `FF_CIRCUIT_BREAKER_ENABLED` (reserved; currently no breaker wiring)
-- `FF_PAGE_SOURCE_STORAGE`
-- `FF_ASYNC_FETCH_ONLY`
-- `FF_METRICS_ENABLED`
-- `FF_TRACING_ENABLED`
-
-## 5. Observability and Middleware
-
-Source of truth:
-- [api/server/server.go](api/server/server.go)
-- [pkg/middleware](pkg/middleware)
-- [pkg/observability](pkg/observability)
-
-Implemented:
-- Request ID middleware
-- Panic recovery middleware
-- Structured logging middleware
-- Real IP extraction
-- OTel tracing middleware (no-op when tracing disabled)
-- Prometheus metrics middleware and endpoint (flag-gated)
-
-## 6. Testing and CI (Current)
-
-## 6.1 Test Inventory
-
-- Unit and package tests across `api/`, `pkg/`, `worker/`
-- Non-docker E2E tests in [api/e2e_test.go](api/e2e_test.go)
-- Docker full-stack E2E in [api/e2e_docker_test.go](api/e2e_docker_test.go)
-
-## 6.2 CI Jobs
-
-Source of truth:
-- [.github/workflows/ci.yml](.github/workflows/ci.yml)
-
-Pipeline:
-- `lint`: install and run `golangci-lint` from source
-- `security`: `govulncheck` + `gitleaks`
-- `build-and-unit`: `go vet`, `go build`, `go test -race`
-- `coverage`: enforce `COVERAGE_MIN=25`
-- `e2e-docker`: docker compose stack + tagged E2E test
-
-Important CI behavior:
-- E2E job appends `FF_ASYNC_FETCH_ONLY=true` to `.env` to make POST flow deterministic.
-
-## 7. Documentation Corrections from Original Draft
-
-The earlier planning document included future-state items that are not present in this repository (for example: `go.work`, `testcontainers-go` integration suite, `docker-compose.test.yml`, and several ADR filenames).
-
-This updated plan now tracks only implemented behavior and explicit next steps.
-
-## 8. Forward Plan (Prioritized)
-
-1. Align module toolchain with CI by updating `go.mod` to patched Go toolchain policy.
-2. Raise coverage gate incrementally (for example, `25 -> 30 -> 40`) with targeted tests.
-3. Either implement circuit breaker wiring or remove `FF_CIRCUIT_BREAKER_ENABLED` until used.
-4. Add regression tests for POST status transitions in sync vs async-only modes.
-5. Expand runbook with failure playbooks for Kafka DLT growth and readiness degradation.
-
-## 9. Definition of Done for This Phase
-
-- Docs reflect actual API and CI behavior.
-- No references to non-existent files or workflows.
-- README and plan remain consistent after each CI policy change.
-
+As the project scales, a few logical next steps would include:
+- Wiring up a true HTTP Circuit Breaker for the worker to prevent overwhelming struggling downstream sites.
+- Expanding the playbook for handling an influx of Kafka DLT failures.
+- Iteratively improving Go test coverage.
