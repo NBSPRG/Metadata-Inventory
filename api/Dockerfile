@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.22-alpine AS builder
+FROM golang:1.25.1-alpine AS builder
 WORKDIR /app
 
 # Cache dependencies
@@ -18,8 +18,7 @@ RUN apk --no-cache add ca-certificates wget
 COPY --from=builder /bin/api /api
 
 # Non-root user
-RUN adduser -D -u 65534 appuser
-USER appuser
+USER nobody
 
 EXPOSE 8080
 ENTRYPOINT ["/api"]

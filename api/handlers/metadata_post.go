@@ -25,18 +25,32 @@ func NewMetadataPostHandler(svc service.MetadataService) *MetadataPostHandler {
 	return &MetadataPostHandler{svc: svc}
 }
 
-// postRequest is the expected JSON body for POST /v1/metadata.
-type postRequest struct {
+// PostRequest is the expected JSON body for POST /v1/metadata.
+type PostRequest struct {
 	URL string `json:"url"`
 }
 
+// ServeHTTP godoc
+// @Summary Create or refresh metadata for a URL
+// @Description Validates a URL, stores a pending metadata record, and either fetches inline or dispatches async collection depending on feature flags.
+// @Tags metadata
+// @Accept json
+// @Produce json
+// @Param request body PostRequest true "URL to inventory"
+// @Success 200 {object} db.MetadataRecord
+// @Success 201 {object} db.MetadataRecord
+// @Success 202 {object} db.MetadataRecord
+// @Failure 400 {object} apperrors.ErrorResponse
+// @Failure 422 {object} apperrors.ErrorResponse
+// @Failure 500 {object} apperrors.ErrorResponse
+// @Router /v1/metadata [post]
 // ServeHTTP handles the POST /v1/metadata endpoint.
 // It validates the URL, calls the service layer, and returns the metadata record.
 func (h *MetadataPostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	requestID := observability.RequestIDFromContext(r.Context())
 
 	// Parse request body
-	var req postRequest
+	var req PostRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_BODY", "Request body must be valid JSON", requestID)
 		return
@@ -52,6 +66,11 @@ func (h *MetadataPostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	record, isNew, err := h.svc.SubmitURL(r.Context(), req.URL)
 	if err != nil {
 		handleServiceError(w, err, requestID)
+		return
+	}
+
+	if record != nil && (record.Status == "pending" || record.Status == "fetching") {
+		writeJSON(w, http.StatusAccepted, record)
 		return
 	}
 

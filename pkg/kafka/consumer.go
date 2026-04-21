@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/segmentio/kafka-go"
 )
 
 // MessageHandler is a function that processes a single FetchRequestMessage.
-// It returns an error if processing fails (triggering retry or DLT routing).
+// It returns an error if processing fails.
 type MessageHandler func(ctx context.Context, msg FetchRequestMessage) error
 
 // EventConsumer defines the interface for consuming Kafka messages.
@@ -24,11 +25,11 @@ type EventConsumer interface {
 }
 
 // KafkaConsumer is the concrete Kafka implementation of EventConsumer.
-// It uses manual offset commit (commit only after successful processing)
-// and routes failed messages to a dead letter topic.
+// It uses manual offset commit and routes terminal failures to a dead letter topic.
 type KafkaConsumer struct {
 	reader     *kafka.Reader
 	dltWriter  *kafka.Writer
+	brokers    []string
 	maxRetries int
 	logger     *slog.Logger
 }
@@ -41,8 +42,8 @@ func NewKafkaConsumer(brokers []string, topic, groupID, dltTopic string, maxRetr
 		Topic:          topic,
 		GroupID:        groupID,
 		MinBytes:       1,
-		MaxBytes:       10e6, // 10MB
-		CommitInterval: 0,    // Manual commit only
+		MaxBytes:       10e6,
+		CommitInterval: 0,
 		StartOffset:    kafka.LastOffset,
 		MaxWait:        1 * time.Second,
 	})
@@ -57,27 +58,26 @@ func NewKafkaConsumer(brokers []string, topic, groupID, dltTopic string, maxRetr
 		slog.String("topic", topic),
 		slog.String("group_id", groupID),
 		slog.String("dlt_topic", dltTopic),
+		slog.Int("max_retries", maxRetries),
 	)
 
 	return &KafkaConsumer{
 		reader:     reader,
 		dltWriter:  dltWriter,
+		brokers:    brokers,
 		maxRetries: maxRetries,
 		logger:     logger,
 	}
 }
 
-// Start begins the consume loop. It processes one message at a time per
-// partition. On success, the offset is committed. On failure after max
-// retries, the message is routed to the dead letter topic.
+// Start begins the consume loop.
 func (c *KafkaConsumer) Start(ctx context.Context, handler MessageHandler) error {
 	c.logger.Info("consumer loop starting")
 
 	for {
-		// Check for cancellation before fetching
 		select {
 		case <-ctx.Done():
-			c.logger.Info("consumer loop stopped — context cancelled")
+			c.logger.Info("consumer loop stopped: context cancelled")
 			return nil
 		default:
 		}
@@ -85,29 +85,29 @@ func (c *KafkaConsumer) Start(ctx context.Context, handler MessageHandler) error
 		msg, err := c.reader.FetchMessage(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil // Graceful shutdown
+				return nil
 			}
 			c.logger.Error("fetch message error", slog.String("error", err.Error()))
 			continue
 		}
 
-		c.processMessage(ctx, msg, handler)
+		if c.processMessage(ctx, msg, handler) {
+			c.commitOffset(ctx, msg)
+		}
 	}
 }
 
-// processMessage handles a single Kafka message: deserialize, process,
-// commit or route to DLT.
-func (c *KafkaConsumer) processMessage(ctx context.Context, msg kafka.Message, handler MessageHandler) {
+// processMessage handles a single Kafka message.
+// It returns true when the offset should be committed.
+func (c *KafkaConsumer) processMessage(ctx context.Context, msg kafka.Message, handler MessageHandler) bool {
 	var fetchMsg FetchRequestMessage
 	if err := json.Unmarshal(msg.Value, &fetchMsg); err != nil {
-		// Poison pill — malformed message, log and skip (don't retry forever)
-		c.logger.Error("malformed message — skipping",
+		c.logger.Error("malformed message: skipping",
 			slog.String("error", err.Error()),
 			slog.Int64("offset", msg.Offset),
 			slog.Int("partition", msg.Partition),
 		)
-		c.commitOffset(ctx, msg)
-		return
+		return true
 	}
 
 	c.logger.Info("processing message",
@@ -116,20 +116,54 @@ func (c *KafkaConsumer) processMessage(ctx context.Context, msg kafka.Message, h
 		slog.Int64("offset", msg.Offset),
 	)
 
-	// Process with handler
-	if err := handler(ctx, fetchMsg); err != nil {
-		c.logger.Error("message processing failed",
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		if err := handler(ctx, fetchMsg); err != nil {
+			if attempt < c.maxRetries {
+				backoff := retryBackoff(attempt + 1)
+				c.logger.Warn("message processing failed: retrying",
+					slog.String("url", fetchMsg.URL),
+					slog.String("request_id", fetchMsg.RequestID),
+					slog.String("error", err.Error()),
+					slog.Int("attempt", attempt+1),
+					slog.Int("max_retries", c.maxRetries),
+					slog.Duration("backoff", backoff),
+				)
+
+				select {
+				case <-ctx.Done():
+					c.logger.Warn("context cancelled before retry completed",
+						slog.String("url", fetchMsg.URL),
+						slog.String("request_id", fetchMsg.RequestID),
+					)
+					return false
+				case <-time.After(backoff):
+				}
+
+				continue
+			}
+
+			c.logger.Error("message processing failed: routing to DLT",
+				slog.String("url", fetchMsg.URL),
+				slog.String("request_id", fetchMsg.RequestID),
+				slog.String("error", err.Error()),
+				slog.Int("retries_used", attempt),
+			)
+
+			if err := c.sendToDLT(ctx, msg, err, attempt); err != nil {
+				return false
+			}
+			return true
+		}
+
+		c.logger.Info("message processed successfully",
 			slog.String("url", fetchMsg.URL),
 			slog.String("request_id", fetchMsg.RequestID),
-			slog.String("error", err.Error()),
+			slog.Int("retries_used", attempt),
 		)
-
-		// Route to dead letter topic
-		c.sendToDLT(ctx, msg, err)
+		return true
 	}
 
-	// Commit offset after processing (success or DLT routing)
-	c.commitOffset(ctx, msg)
+	return true
 }
 
 // commitOffset manually commits the offset for the processed message.
@@ -143,7 +177,7 @@ func (c *KafkaConsumer) commitOffset(ctx context.Context, msg kafka.Message) {
 }
 
 // sendToDLT publishes a failed message to the dead letter topic.
-func (c *KafkaConsumer) sendToDLT(ctx context.Context, original kafka.Message, processingErr error) {
+func (c *KafkaConsumer) sendToDLT(ctx context.Context, original kafka.Message, processingErr error, retriesUsed int) error {
 	dltMsg := kafka.Message{
 		Key:   original.Key,
 		Value: original.Value,
@@ -151,6 +185,8 @@ func (c *KafkaConsumer) sendToDLT(ctx context.Context, original kafka.Message, p
 			{Key: "original-topic", Value: []byte(c.reader.Config().Topic)},
 			{Key: "error", Value: []byte(processingErr.Error())},
 			{Key: "failed-at", Value: []byte(time.Now().UTC().Format(time.RFC3339))},
+			{Key: "retry-count", Value: []byte(strconv.Itoa(retriesUsed))},
+			{Key: "max-retries", Value: []byte(strconv.Itoa(c.maxRetries))},
 		},
 	}
 
@@ -159,11 +195,14 @@ func (c *KafkaConsumer) sendToDLT(ctx context.Context, original kafka.Message, p
 			slog.String("error", err.Error()),
 			slog.Int64("offset", original.Offset),
 		)
-	} else {
-		c.logger.Warn("message sent to DLT",
-			slog.Int64("offset", original.Offset),
-		)
+		return fmt.Errorf("write to DLT: %w", err)
 	}
+
+	c.logger.Warn("message sent to DLT",
+		slog.Int64("offset", original.Offset),
+		slog.Int("retry_count", retriesUsed),
+	)
+	return nil
 }
 
 // Close gracefully shuts down the consumer and DLT writer.
@@ -185,11 +224,25 @@ func (c *KafkaConsumer) Close() error {
 	return firstErr
 }
 
-// Ping verifies the consumer can connect to Kafka by checking reader stats.
-func (c *KafkaConsumer) Ping() error {
-	stats := c.reader.Stats()
-	if stats.Dials > 0 && stats.Errors > stats.Dials {
-		return fmt.Errorf("kafka consumer unhealthy: %d errors out of %d dials", stats.Errors, stats.Dials)
+// Ping verifies the consumer can connect to Kafka.
+func (c *KafkaConsumer) Ping(ctx context.Context) error {
+	if len(c.brokers) == 0 || c.brokers[0] == "" {
+		return fmt.Errorf("no kafka brokers configured")
 	}
+
+	conn, err := kafka.DialContext(ctx, "tcp", c.brokers[0])
+	if err != nil {
+		return fmt.Errorf("dial kafka broker %s: %w", c.brokers[0], err)
+	}
+	defer conn.Close()
+
 	return nil
+}
+
+func retryBackoff(attempt int) time.Duration {
+	backoff := time.Duration(attempt) * 200 * time.Millisecond
+	if backoff > 2*time.Second {
+		return 2 * time.Second
+	}
+	return backoff
 }

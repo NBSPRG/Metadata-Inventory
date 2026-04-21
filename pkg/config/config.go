@@ -22,23 +22,24 @@ type Config struct {
 	Environment    string // "development", "staging", "production"
 
 	// HTTP server
-	HTTPPort         int
-	ReadTimeout      time.Duration
-	WriteTimeout     time.Duration
-	ShutdownTimeout  time.Duration
+	HTTPPort          int
+	WorkerMetricsPort int
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	ShutdownTimeout   time.Duration
 
 	// MongoDB
-	MongoURI          string
-	MongoDB           string
-	MongoMaxPoolSize  uint64
-	MongoConnTimeout  time.Duration
+	MongoURI         string
+	MongoDB          string
+	MongoMaxPoolSize uint64
+	MongoConnTimeout time.Duration
 
 	// Kafka
-	KafkaBrokers      []string
-	KafkaTopic        string
-	KafkaGroupID      string
-	KafkaDLTTopic     string
-	KafkaMaxRetries   int
+	KafkaBrokers    []string
+	KafkaTopic      string
+	KafkaGroupID    string
+	KafkaDLTTopic   string
+	KafkaMaxRetries int
 
 	// Fetcher
 	FetchTimeout      time.Duration
@@ -72,10 +73,11 @@ func Load() (*Config, error) {
 		ServiceVersion: envOrDefault("SERVICE_VERSION", "0.1.0"),
 		Environment:    envOrDefault("ENVIRONMENT", "development"),
 
-		HTTPPort:        envIntOrDefault("HTTP_PORT", 8080),
-		ReadTimeout:     envDurationOrDefault("HTTP_READ_TIMEOUT", 15*time.Second),
-		WriteTimeout:    envDurationOrDefault("HTTP_WRITE_TIMEOUT", 15*time.Second),
-		ShutdownTimeout: envDurationOrDefault("HTTP_SHUTDOWN_TIMEOUT", 30*time.Second),
+		HTTPPort:          envIntOrDefault("HTTP_PORT", 8080),
+		WorkerMetricsPort: envIntOrDefault("WORKER_METRICS_PORT", 9091),
+		ReadTimeout:       envDurationOrDefault("HTTP_READ_TIMEOUT", 15*time.Second),
+		WriteTimeout:      envDurationOrDefault("HTTP_WRITE_TIMEOUT", 15*time.Second),
+		ShutdownTimeout:   envDurationOrDefault("HTTP_SHUTDOWN_TIMEOUT", 30*time.Second),
 
 		MongoURI:         envOrDefault("MONGO_URI", "mongodb://localhost:27017"),
 		MongoDB:          envOrDefault("MONGO_DB", "metadata_inventory"),
@@ -123,6 +125,9 @@ func (c *Config) validate() error {
 	}
 	if c.HTTPPort <= 0 || c.HTTPPort > 65535 {
 		return fmt.Errorf("HTTP_PORT must be between 1 and 65535, got %d", c.HTTPPort)
+	}
+	if c.WorkerMetricsPort <= 0 || c.WorkerMetricsPort > 65535 {
+		return fmt.Errorf("WORKER_METRICS_PORT must be between 1 and 65535, got %d", c.WorkerMetricsPort)
 	}
 	validLogLevels := map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
 	if !validLogLevels[strings.ToLower(c.LogLevel)] {

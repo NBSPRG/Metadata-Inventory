@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/metadata-inventory/pkg/apperrors"
+	"github.com/metadata-inventory/pkg/config"
 	"github.com/metadata-inventory/pkg/db"
 	"github.com/metadata-inventory/pkg/featureflags"
 	"github.com/metadata-inventory/pkg/fetcher"
 	"github.com/metadata-inventory/pkg/kafka"
-	"github.com/metadata-inventory/pkg/config"
 	"github.com/metadata-inventory/pkg/observability"
 
 	"github.com/stretchr/testify/assert"
@@ -25,16 +25,22 @@ func newTestService(repo *db.MockRepository, prod *kafka.MockProducer, f *fetche
 	return NewMetadataService(repo, prod, f, flags, logger)
 }
 
+func newTestServiceWithConfig(repo *db.MockRepository, prod *kafka.MockProducer, f *fetcher.MockFetcher, cfg *config.Config) *MetadataServiceImpl {
+	flags := featureflags.NewEnvFlags(cfg)
+	logger := observability.SetupLogger("info", "test", "0.0.0")
+	return NewMetadataService(repo, prod, f, flags, logger)
+}
+
 func TestSubmitURL_NewURL(t *testing.T) {
 	repo := db.NewMockRepository()
 	prod := &kafka.MockProducer{}
 	f := &fetcher.MockFetcher{
 		Result: &fetcher.FetchResult{
-			StatusCode: 200,
-			Headers:    map[string][]string{"Content-Type": {"text/html"}},
-			Cookies:    []fetcher.CookieInfo{{Name: "id", Value: "abc"}},
+			StatusCode:      200,
+			Headers:         map[string][]string{"Content-Type": {"text/html"}},
+			Cookies:         []fetcher.CookieInfo{{Name: "id", Value: "abc"}},
 			FetchDurationMs: 100,
-			FetchedAt:  time.Now().UTC(),
+			FetchedAt:       time.Now().UTC(),
 		},
 	}
 
@@ -51,8 +57,8 @@ func TestSubmitURL_NewURL(t *testing.T) {
 func TestSubmitURL_ExistingReady(t *testing.T) {
 	repo := db.NewMockRepository()
 	repo.SeedRecord(&db.MetadataRecord{
-		URL:    "https://example.com",
-		Status: db.StatusReady,
+		URL:     "https://example.com",
+		Status:  db.StatusReady,
 		Headers: map[string][]string{"Content-Type": {"text/html"}},
 	})
 	prod := &kafka.MockProducer{}
@@ -77,6 +83,28 @@ func TestSubmitURL_FetchFails(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, apperrors.ErrFetchFailed))
+}
+
+func TestSubmitURL_AsyncFetchOnlyQueuesKafka(t *testing.T) {
+	repo := db.NewMockRepository()
+	prod := &kafka.MockProducer{}
+	f := &fetcher.MockFetcher{}
+
+	svc := newTestServiceWithConfig(repo, prod, f, &config.Config{
+		FFPageSourceStorage: true,
+		FFMetricsEnabled:    true,
+		FFAsyncFetchOnly:    true,
+	})
+
+	record, isNew, err := svc.SubmitURL(context.Background(), "https://example.com")
+
+	require.NoError(t, err)
+	assert.True(t, isNew)
+	require.NotNil(t, record)
+	assert.Equal(t, db.StatusPending, record.Status)
+	assert.Equal(t, 0, f.Called)
+	require.Len(t, prod.Messages, 1)
+	assert.Equal(t, "api-post", prod.Messages[0].Source)
 }
 
 func TestGetMetadata_CacheHit(t *testing.T) {

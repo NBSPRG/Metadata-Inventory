@@ -24,8 +24,7 @@ type MetadataServiceImpl struct {
 	logger   *slog.Logger
 }
 
-// NewMetadataService creates a new MetadataServiceImpl with all dependencies
-// injected. None of these dependencies are optional.
+// NewMetadataService creates a new MetadataServiceImpl with all dependencies injected.
 func NewMetadataService(
 	repo db.MetadataRepository,
 	producer kafka.EventProducer,
@@ -43,27 +42,22 @@ func NewMetadataService(
 }
 
 // SubmitURL processes a POST /v1/metadata request.
-// It is idempotent: if the URL already has status=ready, return existing record.
-// Otherwise, fetch the URL, persist metadata, and return the new record.
 func (s *MetadataServiceImpl) SubmitURL(ctx context.Context, url string) (*db.MetadataRecord, bool, error) {
 	log := observability.LoggerFromContext(ctx, s.logger)
 
-	// Check for existing record (idempotency)
 	existing, err := s.repo.FindByURL(ctx, url)
 	if err != nil {
 		return nil, false, fmt.Errorf("%w: %v", apperrors.ErrDatabaseError, err)
 	}
 
-	// If already ready, return existing (idempotent POST)
 	if existing != nil && existing.Status == db.StatusReady {
-		log.Info("url already fetched — returning cached",
+		log.Info("url already fetched: returning cached",
 			slog.String("url", url),
 			slog.String("status", string(existing.Status)),
 		)
 		return existing, false, nil
 	}
 
-	// If pending/fetching, return the existing record as-is
 	if existing != nil && (existing.Status == db.StatusPending || existing.Status == db.StatusFetching) {
 		log.Info("url already in progress",
 			slog.String("url", url),
@@ -72,7 +66,6 @@ func (s *MetadataServiceImpl) SubmitURL(ctx context.Context, url string) (*db.Me
 		return existing, false, nil
 	}
 
-	// Create a pending record first
 	record := &db.MetadataRecord{
 		URL:       url,
 		Status:    db.StatusPending,
@@ -83,26 +76,38 @@ func (s *MetadataServiceImpl) SubmitURL(ctx context.Context, url string) (*db.Me
 		return nil, false, fmt.Errorf("%w: %v", apperrors.ErrDatabaseError, err)
 	}
 
-	// Synchronous fetch for POST requests
+	if s.flags.IsEnabled(featureflags.AsyncFetchOnly) {
+		if err := s.dispatchAsyncFetch(ctx, url, "api-post"); err != nil {
+			return nil, false, err
+		}
+
+		log.Info("async-only mode enabled: queued post request",
+			slog.String("url", url),
+		)
+
+		queuedRecord, err := s.repo.FindByURL(ctx, url)
+		if err != nil {
+			return nil, false, fmt.Errorf("%w: %v", apperrors.ErrDatabaseError, err)
+		}
+		return queuedRecord, true, nil
+	}
+
 	includePageSource := s.flags.IsEnabled(featureflags.PageSourceStorage)
 
 	log.Info("fetching url", slog.String("url", url))
 
-	// Mark as fetching
 	if err := s.repo.UpdateStatus(ctx, url, db.StatusFetching, nil); err != nil {
 		log.Warn("failed to mark as fetching", slog.String("error", err.Error()))
 	}
 
 	result, fetchErr := s.fetcher.Fetch(url, includePageSource)
 	if fetchErr != nil {
-		// Mark as failed
 		if err := s.repo.UpdateStatus(ctx, url, db.StatusFailed, nil); err != nil {
 			log.Error("failed to update status to failed", slog.String("error", err.Error()))
 		}
 		return nil, false, fmt.Errorf("%w: %v", apperrors.ErrFetchFailed, fetchErr)
 	}
 
-	// Update record with fetch results
 	fetchResult := &db.FetchResult{
 		Headers:             result.Headers,
 		Cookies:             convertCookies(result.Cookies),
@@ -116,7 +121,6 @@ func (s *MetadataServiceImpl) SubmitURL(ctx context.Context, url string) (*db.Me
 		return nil, false, fmt.Errorf("%w: %v", apperrors.ErrDatabaseError, err)
 	}
 
-	// Re-read the final record
 	finalRecord, err := s.repo.FindByURL(ctx, url)
 	if err != nil {
 		return nil, false, fmt.Errorf("%w: %v", apperrors.ErrDatabaseError, err)
@@ -131,29 +135,24 @@ func (s *MetadataServiceImpl) SubmitURL(ctx context.Context, url string) (*db.Me
 }
 
 // GetMetadata processes a GET /v1/metadata request.
-// Returns cached data if available, otherwise dispatches async Kafka job.
 func (s *MetadataServiceImpl) GetMetadata(ctx context.Context, url string) (*db.MetadataRecord, bool, error) {
 	log := observability.LoggerFromContext(ctx, s.logger)
 
-	// Check cache
 	record, err := s.repo.FindByURL(ctx, url)
 	if err != nil {
 		return nil, false, fmt.Errorf("%w: %v", apperrors.ErrDatabaseError, err)
 	}
 
-	// Cache hit — return immediately
 	if record != nil && record.Status == db.StatusReady {
 		log.Info("cache hit", slog.String("url", url))
 		return record, false, nil
 	}
 
-	// If already pending/fetching, don't re-dispatch
 	if record != nil && (record.Status == db.StatusPending || record.Status == db.StatusFetching) {
 		log.Info("url already in progress", slog.String("url", url))
-		return nil, true, nil // queued = true
+		return nil, true, nil
 	}
 
-	// Cache miss — create pending record and dispatch async
 	pendingRecord := &db.MetadataRecord{
 		URL:       url,
 		Status:    db.StatusPending,
@@ -164,29 +163,40 @@ func (s *MetadataServiceImpl) GetMetadata(ctx context.Context, url string) (*db.
 		return nil, false, fmt.Errorf("%w: %v", apperrors.ErrDatabaseError, err)
 	}
 
-	// Dispatch async fetch via Kafka
+	if err := s.dispatchAsyncFetch(ctx, url, "api-get"); err != nil {
+		return nil, false, err
+	}
+
+	return nil, true, nil
+}
+
+func (s *MetadataServiceImpl) dispatchAsyncFetch(ctx context.Context, url, source string) error {
+	log := observability.LoggerFromContext(ctx, s.logger)
+
 	msg := kafka.FetchRequestMessage{
 		Version:     kafka.MessageVersion,
 		URL:         url,
 		RequestedAt: time.Now().UTC(),
 		RequestID:   observability.RequestIDFromContext(ctx),
-		Source:      "api-get",
+		Source:      source,
 	}
 
 	if err := s.producer.Publish(ctx, msg); err != nil {
-		log.Error("failed to publish to kafka — falling back",
+		log.Error("failed to publish to kafka",
 			slog.String("url", url),
+			slog.String("source", source),
 			slog.String("error", err.Error()),
 		)
-		return nil, false, fmt.Errorf("%w: %v", apperrors.ErrKafkaError, err)
+		return fmt.Errorf("%w: %v", apperrors.ErrKafkaError, err)
 	}
 
 	log.Info("async fetch dispatched",
 		slog.String("url", url),
 		slog.String("request_id", msg.RequestID),
+		slog.String("source", source),
 	)
 
-	return nil, true, nil // queued = true
+	return nil
 }
 
 // convertCookies transforms fetcher.CookieInfo to db.CookieRecord.

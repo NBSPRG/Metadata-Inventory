@@ -5,6 +5,8 @@ package db
 
 import (
 	"time"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // Status represents the processing state of a metadata record.
@@ -20,7 +22,7 @@ const (
 // MetadataRecord represents a single URL's fetched metadata stored in MongoDB.
 // Fields use both BSON tags (for MongoDB) and JSON tags (for API responses).
 type MetadataRecord struct {
-	ID                string            `bson:"_id,omitempty"  json:"id"`
+	ID                primitive.ObjectID `bson:"_id,omitempty"  json:"-"`
 	URL               string            `bson:"url"            json:"url"`
 	URLHash           string            `bson:"url_hash"       json:"url_hash,omitempty"`
 	Status            Status            `bson:"status"         json:"status"`

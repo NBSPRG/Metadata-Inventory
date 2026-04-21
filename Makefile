@@ -1,4 +1,4 @@
-.PHONY: all build test lint clean up down fmt vet tidy
+.PHONY: all build test lint clean up down fmt vet tidy swagger
 
 # ============================================================
 # HTTP Metadata Inventory — Makefile
@@ -51,10 +51,12 @@ logs:
 
 # --- Utilities ---
 clean:
-	rm -rf bin/ coverage.out coverage.html
+	if exist bin rmdir /s /q bin
+	if exist coverage.out del /q coverage.out
+	if exist coverage.html del /q coverage.html
 
 env:
-	cp -n .env.example .env || true
+	if not exist .env copy .env.example .env >NUL
 
 help:
 	@echo "Available targets:"
@@ -70,3 +72,7 @@ help:
 	@echo "  logs         - Tail docker-compose logs"
 	@echo "  clean        - Remove build artifacts"
 	@echo "  env          - Create .env from .env.example"
+	@echo "  swagger      - Generate Swagger docs"
+
+swagger:
+	"%USERPROFILE%\\go\\bin\\swag.exe" init -g api/main.go -o docs/swagger
