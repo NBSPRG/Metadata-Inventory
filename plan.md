@@ -4,7 +4,9 @@ This document provides a high-level overview of how the HTTP Metadata Inventory 
 
 ## Architecture Overview
 
-![System Architecture Diagram](img/image.png)
+<p align="center">
+  <img src="./img/flow.png" width="500"/>
+</p>
 
 The system is designed around a clean, decoupled architecture:
 - **API Service**: Handles incoming HTTP requests, validates URLs, and either performs inline fetching or delegates to the background worker via Kafka.
