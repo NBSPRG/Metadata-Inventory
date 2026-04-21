@@ -1,4 +1,4 @@
-.PHONY: all build test lint clean up down fmt vet tidy swagger test-e2e-docker
+.PHONY: all build test lint clean up down fmt vet tidy swagger test-e2e-docker install-deps
 
 # ============================================================
 # HTTP Metadata Inventory — Makefile
@@ -40,25 +40,30 @@ test-verbose:
 	go test -race -v -count=1 ./...
 
 test-e2e-docker:
-	docker-compose down -v
-	docker-compose up -d --build
+	docker compose down -v
+	docker compose up -d --build
 	go test -tags=e2e_docker -count=1 -v ./api -run TestE2E_DockerFullStack
 
 # --- Docker ---
 up:
-	docker-compose up -d --build
+	docker compose up -d --build
 
 down:
-	docker-compose down -v
+	docker compose down -v
 
 logs:
-	docker-compose logs -f
+	docker compose logs -f
 
 # --- Utilities ---
 clean:
 	if exist bin rmdir /s /q bin
 	if exist coverage.out del /q coverage.out
 	if exist coverage.html del /q coverage.html
+
+install-deps:
+	@echo "Installing Go and build-essential (requires sudo privileges)..."
+	sudo snap install go --classic || sudo apt-get update && sudo apt-get install -y golang-go
+	sudo apt-get update && sudo apt-get install -y build-essential
 
 env:
 	if not exist .env copy .env.example .env >NUL
@@ -78,6 +83,7 @@ help:
 	@echo "  clean        - Remove build artifacts"
 	@echo "  env          - Create .env from .env.example"
 	@echo "  swagger      - Generate Swagger docs"
+	@echo "  install-deps - Install Go and build tools (Ubuntu/Debian)"
 
 swagger:
 	swag init -g api/main.go -o docs/swagger
