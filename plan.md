@@ -4,6 +4,16 @@ This document provides a high-level overview of how the HTTP Metadata Inventory 
 
 ## Architecture Overview
 
+```mermaid
+graph TD
+    Client((Client)) -->|GET/POST| API[API Service]
+    API -->|Cache Check & Initial Write| Mongo[(MongoDB)]
+    API -.->|Publish Fetch Job on Cache Miss| Kafka{Kafka Broker}
+    Kafka -->|Consume Fetch Job| Worker[Background Worker]
+    Worker -->|HTTP Fetch Payload| Web((External Web URLs))
+    Worker -->|Update Data & Status| Mongo
+```
+
 The system is designed around a clean, decoupled architecture:
 - **API Service**: Handles incoming HTTP requests, validates URLs, and either performs inline fetching or delegates to the background worker via Kafka.
 - **Background Worker**: A standalone Go application that continuously consumes Kafka messages to process URL fetches asynchronously. This prevents the API from being blocked by slow external sites or large payloads.
