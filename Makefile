@@ -56,9 +56,7 @@ logs:
 
 # --- Utilities ---
 clean:
-	if exist bin rmdir /s /q bin
-	if exist coverage.out del /q coverage.out
-	if exist coverage.html del /q coverage.html
+	rm -rf bin coverage.out coverage.html
 
 install-deps:
 	@echo "Installing Go and build-essential (requires sudo privileges)..."
@@ -66,7 +64,7 @@ install-deps:
 	sudo apt-get update && sudo apt-get install -y build-essential
 
 env:
-	if not exist .env copy .env.example .env >NUL
+	test -f .env || cp .env.example .env
 
 help:
 	@echo "Available targets:"
