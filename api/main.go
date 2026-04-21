@@ -75,7 +75,9 @@ func run() error {
 	}
 	defer func() {
 		if tracerShutdown != nil {
-			tracerShutdown(context.Background())
+			if err := tracerShutdown(context.Background()); err != nil {
+				logger.Warn("tracer shutdown failed", slog.String("error", err.Error()))
+			}
 		}
 	}()
 

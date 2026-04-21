@@ -19,7 +19,7 @@ import (
 	"github.com/metadata-inventory/pkg/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 func newE2EServer(t *testing.T, cfg *config.Config) (*httptest.Server, *db.MockRepository, *kafka.MockProducer, *fetcher.MockFetcher) {
@@ -37,7 +37,7 @@ func newE2EServer(t *testing.T, cfg *config.Config) (*httptest.Server, *db.MockR
 	healthHandler := handlers.NewHealthHandler()
 	readyHandler := handlers.NewReadyHandler(repo, producer)
 
-	router := server.NewRouter(logger, nil, trace.NewNoopTracerProvider().Tracer("test"), flags)
+	router := server.NewRouter(logger, nil, noop.NewTracerProvider().Tracer("test"), flags)
 	server.RegisterRoutes(router, postHandler, getHandler, healthHandler, readyHandler)
 
 	return httptest.NewServer(router), repo, producer, mockFetcher

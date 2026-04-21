@@ -31,7 +31,7 @@ func TestHTTPFetcher_BasicFetch(t *testing.T) {
 		w.Header().Set("X-Custom-Header", "custom-value")
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("<html><body>Hello</body></html>"))
+		_, _ = w.Write([]byte("<html><body>Hello</body></html>"))
 	}))
 	defer server.Close()
 
@@ -51,7 +51,7 @@ func TestHTTPFetcher_BasicFetch(t *testing.T) {
 func TestHTTPFetcher_WithoutPageSource(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("<html><body>Skipped</body></html>"))
+		_, _ = w.Write([]byte("<html><body>Skipped</body></html>"))
 	}))
 	defer server.Close()
 
