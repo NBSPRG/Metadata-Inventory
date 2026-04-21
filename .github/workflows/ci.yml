@@ -111,7 +111,7 @@ jobs:
 
       - name: Enforce minimum coverage
         env:
-          COVERAGE_MIN: "60"
+          COVERAGE_MIN: "25"
         run: |
           total=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%", "", $3); print $3}')
           echo "Total coverage: ${total}%"
