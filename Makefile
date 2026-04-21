@@ -75,4 +75,4 @@ help:
 	@echo "  swagger      - Generate Swagger docs"
 
 swagger:
-	"%USERPROFILE%\\go\\bin\\swag.exe" init -g api/main.go -o docs/swagger
+	swag init -g api/main.go -o docs/swagger
