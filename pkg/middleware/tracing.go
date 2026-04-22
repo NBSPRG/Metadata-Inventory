@@ -3,8 +3,8 @@ package middleware
 import (
 	"net/http"
 
-	"go.opentelemetry.io/otel/trace"
 	"github.com/metadata-inventory/pkg/observability"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Tracing returns middleware that extracts or creates an OpenTelemetry

@@ -12,16 +12,16 @@ type MockRepository struct {
 	records map[string]*MetadataRecord
 
 	// Hooks for test assertions
-	FindByURLCalled   int
-	UpsertCalled      int
+	FindByURLCalled    int
+	UpsertCalled       int
 	UpdateStatusCalled int
-	PingCalled        int
+	PingCalled         int
 
 	// Configurable error returns for testing error paths
-	FindByURLErr   error
-	UpsertErr      error
+	FindByURLErr    error
+	UpsertErr       error
 	UpdateStatusErr error
-	PingErr        error
+	PingErr         error
 }
 
 // NewMockRepository creates a new MockRepository.

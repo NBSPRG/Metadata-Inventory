@@ -10,13 +10,13 @@ import (
 
 // FetchResult holds all metadata extracted from an HTTP response.
 type FetchResult struct {
-	StatusCode        int
-	Headers           map[string][]string
-	Cookies           []CookieInfo
-	PageSource        string
+	StatusCode          int
+	Headers             map[string][]string
+	Cookies             []CookieInfo
+	PageSource          string
 	PageSourceSizeBytes int
-	FetchDurationMs   int64
-	FetchedAt         time.Time
+	FetchDurationMs     int64
+	FetchedAt           time.Time
 }
 
 // CookieInfo holds a sanitized cookie from the response.

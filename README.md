@@ -96,6 +96,16 @@ Pipeline file: [.github/workflows/ci.yml](.github/workflows/ci.yml)
 - Coverage gate: minimum `25%`
 - Docker E2E sets `FF_ASYNC_FETCH_ONLY=true` before stack startup
 
+## Deployment Strategy (CD)
+
+While a full Continuous Deployment pipeline is not implemented here to avoid requiring specific cloud credentials, the project is structured to be immediately deployable to modern container orchestration platforms (like AWS ECS/EKS or Google Cloud Run/GKE).
+
+In a production scenario, the deployment pipeline would look like this:
+1. **Build & Publish**: The GitHub Actions CI pipeline would be extended to run `docker build` and `docker push` for both `api` and `worker` images, pushing them to a secure registry (e.g., AWS ECR or Docker Hub) upon merging to `main`.
+2. **Infrastructure as Code**: Terraform or Pulumi would be used to provision the required cloud resources (managed MongoDB Atlas, managed Kafka/MSK, and the container runtime).
+3. **Continuous Deployment**: A tool like ArgoCD (for Kubernetes) or an ECS rolling update step in GitHub Actions would deploy the new image tags automatically.
+4. **Environment Variables**: Feature flags and configurations (like `FF_ASYNC_FETCH_ONLY`, database URIs, etc.) would be injected securely via AWS Secrets Manager or Kubernetes Secrets.
+
 ## API Docs
 
 - Swagger UI: `http://localhost:8080/swagger/index.html`

@@ -5,10 +5,10 @@ import "time"
 // MockFetcher is a test double for the Fetcher interface.
 // It returns a configurable result or error.
 type MockFetcher struct {
-	Result   *FetchResult
-	Err      error
-	Called   int
-	LastURL  string
+	Result  *FetchResult
+	Err     error
+	Called  int
+	LastURL string
 }
 
 // Fetch returns the configured result or error, and records the call.
@@ -34,9 +34,9 @@ func (m *MockFetcher) Fetch(url string, includePageSource bool) (*FetchResult, e
 		Cookies: []CookieInfo{
 			{Name: "session", Value: "abc123", HTTPOnly: true, Secure: true},
 		},
-		PageSource:        "<html><body>mock</body></html>",
+		PageSource:          "<html><body>mock</body></html>",
 		PageSourceSizeBytes: 29,
-		FetchDurationMs:   42,
-		FetchedAt:         time.Now().UTC(),
+		FetchDurationMs:     42,
+		FetchedAt:           time.Now().UTC(),
 	}, nil
 }

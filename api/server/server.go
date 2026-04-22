@@ -81,11 +81,11 @@ func NewRouter(
 	r := chi.NewRouter()
 
 	// --- Global middleware stack (order matters) ---
-	r.Use(mw.RequestID)                    // 1. Request ID first — all subsequent middleware can use it
-	r.Use(mw.Recovery(logger))             // 2. Recovery — catch panics before logging
-	r.Use(mw.Logging(logger))              // 3. Structured request logging
-	r.Use(chimw.RealIP)                    // 4. Extract real IP for rate limiting
-	r.Use(mw.Tracing(tracer))              // 5. OTel tracing spans
+	r.Use(mw.RequestID)        // 1. Request ID first — all subsequent middleware can use it
+	r.Use(mw.Recovery(logger)) // 2. Recovery — catch panics before logging
+	r.Use(mw.Logging(logger))  // 3. Structured request logging
+	r.Use(chimw.RealIP)        // 4. Extract real IP for rate limiting
+	r.Use(mw.Tracing(tracer))  // 5. OTel tracing spans
 
 	// Conditional middleware
 	if flags.IsEnabled(featureflags.MetricsEnabled) {

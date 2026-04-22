@@ -10,8 +10,8 @@ import (
 // default prometheus registry).
 type Metrics struct {
 	// HTTP metrics
-	HTTPRequestsTotal    *prometheus.CounterVec
-	HTTPRequestDuration  *prometheus.HistogramVec
+	HTTPRequestsTotal   *prometheus.CounterVec
+	HTTPRequestDuration *prometheus.HistogramVec
 
 	// Metadata cache metrics
 	MetadataCacheHits   prometheus.Counter

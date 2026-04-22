@@ -119,6 +119,24 @@ jobs:
           echo "Total coverage: ${total}%"
           awk -v total="$total" -v min="$COVERAGE_MIN" 'BEGIN { exit (total+0 >= min+0) ? 0 : 1 }'
 
+  docker-build:
+    name: Docker Build Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs:
+      - lint
+      - security
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build API Image
+        run: docker build -f api/Dockerfile -t metadata-api:test .
+
+      - name: Build Worker Image
+        run: docker build -f worker/Dockerfile -t metadata-worker:test .
+
   e2e-docker:
     name: Docker Full-Stack E2E
     runs-on: ubuntu-latest
